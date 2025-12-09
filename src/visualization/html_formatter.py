@@ -5,6 +5,26 @@ from typing import Dict
 
 class HTMLFormatter:
     """Formats statistics and quality metrics as HTML"""
+
+    @staticmethod
+    def _format_repetition_list(repetitions: list) -> str:
+        """Helper to format repetition list"""
+        if not repetitions:
+            return ""
+            
+        html = '<div style="margin-top: 10px; font-size: 0.9em;">'
+        html += '<div style="opacity: 0.8; margin-bottom: 5px;">Most Overused Words:</div>'
+        html += '<div style="display: flex; flex-wrap: wrap; gap: 5px;">'
+        
+        for item in repetitions[:5]:
+            html += (
+                f'<span style="background: rgba(255, 76, 76, 0.2); color: #ff9999; '
+                f'padding: 2px 8px; border-radius: 10px; border: 1px solid rgba(255, 76, 76, 0.3);">'
+                f'{item["word"]} ({item["count"]})</span>'
+            )
+            
+        html += '</div></div>'
+        return html
     
     @staticmethod
     def format_statistics(stats: Dict) -> str:
@@ -159,6 +179,45 @@ class HTMLFormatter:
                     </tr>
                 </tbody>
             </table>
+            <!-- Repetition Analysis -->
+            <div style="margin-top: 15px; border-top: 1px solid rgba(255,255,255,0.1); padding-top: 15px;">
+                <h4 style="margin: 0 0 10px 0; color: #add8e6;">🔁 Repetition Guard (Anti-Echo)</h4>
+                
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+                    <!-- Local Echo Score -->
+                    <div style="background: rgba(255,255,255,0.05); padding: 10px; border-radius: 5px;">
+                        <div style="font-size: 0.8em; opacity: 0.7;">Echo Score (Lower is better)</div>
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 5px;">
+                            <div>
+                                <span style="font-size: 0.9em;">Input:</span>
+                                <strong>{input_metrics.get('repetition', {}).get('local_repetition_score', 0.0):.2f}</strong>
+                            </div>
+                            <div style="font-size: 1.2em;">→</div>
+                            <div>
+                                <span style="font-size: 0.9em;">Output:</span>
+                                <strong style="color: {get_diff_color(input_metrics.get('repetition', {}).get('local_repetition_score', 0.0), output_metrics.get('repetition', {}).get('local_repetition_score', 0.0), inverse=True)}">
+                                    {output_metrics.get('repetition', {}).get('local_repetition_score', 0.0):.2f}
+                                </strong>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Total Repetitions -->
+                    <div style="background: rgba(255,255,255,0.05); padding: 10px; border-radius: 5px;">
+                        <div style="font-size: 0.8em; opacity: 0.7;">Total Repetitions Detected</div>
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 5px;">
+                             <div>{input_metrics.get('repetition', {}).get('total_repetitions_found', 0)}</div>
+                             <div style="font-size: 1.2em;">→</div>
+                             <div style="color: {get_diff_color(input_metrics.get('repetition', {}).get('total_repetitions_found', 0), output_metrics.get('repetition', {}).get('total_repetitions_found', 0), inverse=True)}">
+                                <strong>{output_metrics.get('repetition', {}).get('total_repetitions_found', 0)}</strong>
+                             </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Top Repetitions List -->
+                {HTMLFormatter._format_repetition_list(output_metrics.get('repetition', {}).get('top_global_repetitions', []))}
+            </div>
         </div>
         """
         

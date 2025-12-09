@@ -8,6 +8,7 @@ from typing import Dict
 
 from ..config.settings import Settings
 from .similarity import SimilarityCalculator
+from .repetition import RepetitionDetector
 from sentence_transformers import util
 
 logger = logging.getLogger(__name__)
@@ -29,6 +30,7 @@ class QualityMetrics:
         if not hasattr(self, '_initialized'):
             self._initialized = True
             self.similarity_calculator = SimilarityCalculator()
+            self.repetition_detector = RepetitionDetector()
             
             if QualityMetrics._grammar_tool is None:
                 try:
@@ -58,7 +60,10 @@ class QualityMetrics:
                 "punctuation_issues": 0,
                 "logical_flow": 0.0,
                 "readability_score": 0.0,
-                "readability_label": "N/A"
+                "logical_flow": 0.0,
+                "readability_score": 0.0,
+                "readability_label": "N/A",
+                "repetition": {}
             }
         
         try:
@@ -118,12 +123,16 @@ class QualityMetrics:
             else:
                 label = "Very Difficult"
             
+            # 4. Repetition Analysis
+            repetition_metrics = self.repetition_detector.detect(text)
+            
             return {
                 "grammar_issues": grammar_errors,
                 "punctuation_issues": punct_errors,
                 "logical_flow": flow_score,
                 "readability_score": readability,
-                "readability_label": label
+                "readability_label": label,
+                "repetition": repetition_metrics
             }
             
         except Exception as e:
@@ -133,7 +142,10 @@ class QualityMetrics:
                 "punctuation_issues": 0,
                 "logical_flow": 0.0,
                 "readability_score": 0.0,
-                "readability_label": "Error"
+                "logical_flow": 0.0,
+                "readability_score": 0.0,
+                "readability_label": "Error",
+                "repetition": {}
             }
 
 
