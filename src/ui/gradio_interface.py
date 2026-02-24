@@ -2,8 +2,9 @@
 
 import logging
 import traceback
+from pathlib import Path
 import gradio as gr
-from typing import Tuple
+from typing import Tuple, Optional
 
 from ..models.model_config import PARAPHRASE_MODELS, EXPANSION_MODELS
 from ..processing.paraphraser import Paraphraser
@@ -32,6 +33,57 @@ def update_parameters_visibility(mode: str) -> gr.Number:
         return gr.Number(visible=False)
 
 
+def handle_file_upload(file) -> Tuple[str, str, str]:
+    """
+    Handle markdown file upload
+    
+    Args:
+        file: Uploaded file object from Gradio
+        
+    Returns:
+        Tuple of (file_content, file_info, error_message)
+    """
+    from ..processing.file_processor import FileProcessor
+    
+    if file is None:
+        return "", "", ""
+    
+    try:
+        # Get file path from Gradio file object
+        file_path = file.name if hasattr(file, 'name') else str(file)
+        
+        # Read and validate markdown file
+        content, error = FileProcessor.read_markdown_file(file_path)
+        
+        if error:
+            logger.error(f"File upload error: {error}")
+            return "", "", f"❌ {error}"
+        
+        # Save a copy to uploads directory
+        from ..config.settings import Settings
+        saved_path, save_error = FileProcessor.save_markdown_file(
+            content, 
+            file_path, 
+            Settings.UPLOADS_DIR
+        )
+        
+        if save_error:
+            logger.warning(f"Could not save copy of upload: {save_error}")
+            save_msg = f"✅ Loaded, but could not save copy."
+        else:
+            save_msg = f"✅ Loaded and saved to: {Path(saved_path).name}"
+        
+        # Get file info
+        file_info = FileProcessor.get_file_info(file_path)
+        
+        logger.info(f"File uploaded and saved successfully: {file_path}")
+        return content, file_info, save_msg
+        
+    except Exception as e:
+        logger.error(f"Unexpected error in file upload: {str(e)}", exc_info=True)
+        return "", "", f"❌ Error: {str(e)}"
+
+
 def process_text(
     input_text: str,
     mode: str,
@@ -41,14 +93,15 @@ def process_text(
     max_length: int,
     num_beams: int,
     max_sentences: int,
-    target_words: int
-) -> Tuple[str, str, float, str, str, str, str]:
+    target_words: int,
+    markdown_mode: bool = False
+) -> Tuple[str, str, float, str, str, str, str, Optional[str]]:
     """
     Main processing function with Comparative Quality Metrics
     
     Returns:
         Tuple of (output_text, basic_stats, similarity, highlighted_original,
-                 highlighted_generated, stats_html, quality_html)
+                 highlighted_generated, stats_html, quality_html, result_file_path)
     """
     try:
         # Initialize components
@@ -62,17 +115,33 @@ def process_text(
         input_metrics = quality_metrics.calculate(input_text)
         
         # Generate Paraphrased/Expanded Text
-        output_text, similarity = paraphraser.process_text(
-            input_text,
-            model_name,
-            temperature,
-            top_p,
-            max_length,
-            num_beams,
-            max_sentences,
-            target_words,
-            mode
-        )
+        if markdown_mode:
+            # Use markdown-aware processing
+            logger.info("Using markdown-aware processing")
+            output_text, similarity = paraphraser.process_markdown(
+                input_text,
+                model_name,
+                temperature,
+                top_p,
+                max_length,
+                num_beams,
+                max_sentences,
+                target_words,
+                mode
+            )
+        else:
+            # Use standard processing
+            output_text, similarity = paraphraser.process_text(
+                input_text,
+                model_name,
+                temperature,
+                top_p,
+                max_length,
+                num_beams,
+                max_sentences,
+                target_words,
+                mode
+            )
         
         # Analyze OUTPUT Quality
         output_metrics = quality_metrics.calculate(output_text)
@@ -105,6 +174,21 @@ def process_text(
             output_metrics
         )
         
+        # Save refined result if in markdown mode or if requested
+        from ..config.settings import Settings
+        from ..processing.file_processor import FileProcessor
+        
+        result_file_path = None
+        if markdown_mode:
+            saved_result_path, result_save_error = FileProcessor.save_markdown_file(
+                output_text,
+                "refined_output.md",
+                Settings.RESULTS_DIR
+            )
+            if not result_save_error:
+                result_file_path = saved_result_path
+                logger.info(f"Result saved to: {result_file_path}")
+        
         # Basic stats line
         basic_stats = (
             f"**Original:** {word_count_original} words | "
@@ -119,13 +203,14 @@ def process_text(
             highlighted_original,
             highlighted_generated,
             stats_html,
-            quality_html
+            quality_html,
+            result_file_path
         )
         
     except Exception as e:
         error_msg = f"Error: {str(e)}\n\n{traceback.format_exc()}"
         logger.error(error_msg, exc_info=True)
-        return error_msg, "Error occurred", 0.0, "", "", "", ""
+        return error_msg, "Error occurred", 0.0, "", "", "", "", None
 
 
 def create_gradio_interface() -> gr.Blocks:
@@ -146,6 +231,22 @@ def create_gradio_interface() -> gr.Blocks:
                     value="Paraphrase",
                     label="Mode",
                     info="Choose to paraphrase or expand your text"
+                )
+                
+                # File upload section
+                gr.Markdown("### 📂 Upload Markdown File (Optional)")
+                file_upload = gr.File(
+                    label="Upload .md file",
+                    file_types=[".md"],
+                    type="filepath"
+                )
+                file_info_display = gr.Markdown("", visible=False)
+                file_status = gr.Markdown("", visible=False)
+                
+                markdown_mode_checkbox = gr.Checkbox(
+                    label="Preserve Markdown Structure",
+                    value=False,
+                    info="Keep headings, links, and code blocks intact (auto-enabled for file uploads)"
                 )
                 
                 model_dropdown = gr.Dropdown(
@@ -224,11 +325,18 @@ def create_gradio_interface() -> gr.Blocks:
                     lines=10,
                     label="Processed Text"
                 )
+                
+                # Result download component
+                result_download = gr.File(
+                    label="📥 Download Refined Markdown",
+                    interactive=False,
+                    visible=False
+                )
         
         with gr.Row():
             process_btn = gr.Button("🚀 Generate", variant="primary", size="lg")
             clear_btn = gr.ClearButton(
-                [input_text, output_text],
+                [input_text, output_text, file_upload, result_download],
                 value="🗑️ Clear"
             )
         
@@ -263,6 +371,21 @@ def create_gradio_interface() -> gr.Blocks:
         quality_stats = gr.HTML(label="Quality Analysis")
         
         # Event handlers
+        # File upload handler
+        file_upload.change(
+            fn=handle_file_upload,
+            inputs=[file_upload],
+            outputs=[input_text, file_info_display, file_status]
+        ).then(
+            fn=lambda info, status: (
+                gr.Markdown(value=info, visible=bool(info)),
+                gr.Markdown(value=status, visible=bool(status)),
+                True  # Auto-enable markdown mode for file uploads
+            ),
+            inputs=[file_info_display, file_status],
+            outputs=[file_info_display, file_status, markdown_mode_checkbox]
+        )
+        
         mode.change(
             fn=update_model_choices,
             inputs=[mode],
@@ -286,7 +409,8 @@ def create_gradio_interface() -> gr.Blocks:
                 max_length,
                 num_beams,
                 max_sentences,
-                target_words
+                target_words,
+                markdown_mode_checkbox
             ],
             outputs=[
                 output_text,
@@ -295,14 +419,23 @@ def create_gradio_interface() -> gr.Blocks:
                 highlighted_original,
                 highlighted_generated,
                 change_stats,
-                quality_stats
+                quality_stats,
+                result_download
             ]
+        ).then(
+            fn=lambda x: gr.File(visible=bool(x)),
+            inputs=[result_download],
+            outputs=[result_download]
         )
         
         gr.Markdown(
             """
             ---
             ### 💡 Tips:
+            - **File Upload**: Upload `.md` files to process markdown content with structure preservation
+            - **Download Results**: Refined markdown will be available for download after generation
+            - **File Storage**: Uploaded files are saved to `data/uploads/` and refined files to `data/results/`
+            - **Markdown Mode**: When enabled, headings, links, and code blocks remain unchanged
             - **Paraphrase Mode**: Rewrites text while preserving meaning
             - **Expand Mode**: Adds details and elaboration to make text longer
             - **Sentences per Chunk**: Controls how many sentences are processed together (4 recommended)

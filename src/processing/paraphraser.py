@@ -151,5 +151,114 @@ class Paraphraser:
         except Exception as e:
             logger.error(f"Error processing text: {str(e)}", exc_info=True)
             raise RuntimeError(f"Failed to process text: {str(e)}") from e
-
+    
+    def process_markdown(
+        self,
+        markdown_text: str,
+        model_name: str,
+        temperature: float,
+        top_p: float,
+        max_length: int,
+        num_beams: int,
+        max_sentences: int,
+        target_words: int = None,
+        mode: str = "Paraphrase"
+    ) -> Tuple[str, float]:
+        """
+        Process markdown while preserving structure (headings, links, code)
+        
+        Args:
+            markdown_text: Input markdown to process
+            model_name: Name of the model to use
+            temperature: Generation temperature
+            top_p: Top-p sampling parameter
+            max_length: Maximum generation length
+            num_beams: Number of beams for beam search
+            max_sentences: Maximum sentences per chunk
+            target_words: Target word count for expansion mode
+            mode: Processing mode ("Paraphrase" or "Expand")
+            
+        Returns:
+            Tuple of (processed_markdown, similarity_score)
+        """
+        from .markdown_processor import MarkdownProcessor
+        
+        logger.info("Processing markdown with structure preservation")
+        
+        # Parse markdown structure
+        md_processor = MarkdownProcessor()
+        md_processor.parse(markdown_text)
+        
+        # Extract processable text elements
+        processable = md_processor.extract_processable_text()
+        
+        if not processable:
+            logger.warning("No processable content found in markdown")
+            return markdown_text, 1.0
+        
+        import re
+        link_pattern = re.compile(r'\[([^\]]+)\]\(([^)]+)\)')
+        
+        processed_texts = {}
+        all_original = []
+        all_processed = []
+        
+        for idx, text_content in processable:
+            # Split paragraph into sentences
+            sentences = re.split(r'(?<=[.!?])\s+', text_content)
+            
+            processed_sentences = []
+            
+            for sentence in sentences:
+                has_links = bool(link_pattern.search(sentence))
+                
+                if has_links:
+                    # Sentence contains links — keep it verbatim
+                    logger.info(f"Preserving sentence with link: {sentence[:50]}...")
+                    processed_sentences.append(sentence)
+                else:
+                    # Plain sentence — safe to process through AI
+                    if sentence.strip():
+                        try:
+                            processed, _ = self.process_text(
+                                sentence,
+                                model_name,
+                                temperature,
+                                top_p,
+                                max_length,
+                                num_beams,
+                                max_sentences,
+                                target_words,
+                                mode
+                            )
+                            processed_sentences.append(processed)
+                        except Exception as e:
+                            logger.error(f"Error processing sentence: {str(e)}")
+                            processed_sentences.append(sentence)
+                    else:
+                        processed_sentences.append(sentence)
+            
+            # Recombine sentences back into paragraph
+            combined_paragraph = " ".join(processed_sentences)
+            processed_texts[idx] = combined_paragraph
+            
+            all_original.append(text_content)
+            all_processed.append(combined_paragraph)
+        
+        # Reconstruct markdown
+        final_markdown = md_processor.reconstruct(processed_texts)
+        
+        # Calculate overall similarity
+        if all_original and all_processed:
+            combined_original = " ".join(all_original)
+            combined_processed = " ".join(all_processed)
+            similarity_score = self.similarity_calculator.calculate(
+                combined_original,
+                combined_processed
+            )
+        else:
+            similarity_score = 1.0
+        
+        logger.info(f"Markdown processing complete. Similarity: {similarity_score:.4f}")
+        return final_markdown, similarity_score
 

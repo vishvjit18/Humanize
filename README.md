@@ -4,6 +4,8 @@ A production-ready Python application for text paraphrasing and expansion using 
 
 ## Features
 
+- **Markdown File Upload**: Upload `.md` files and process with structure preservation
+- **Structure Preservation**: Keep headings, links, and code blocks intact during processing
 - **Text Paraphrasing**: Rewrite text while preserving meaning using multiple T5-based models
 - **Text Expansion**: Expand text with additional details and context using Flan-T5 models
 - **Quality Metrics**: Analyze grammar, readability, logical flow, and punctuation
@@ -79,6 +81,14 @@ Edit the `.env` file to customize:
 - Flan-T5-Large (google/flan-t5-large)
 
 ## Features in Detail
+
+### Markdown File Upload
+- Upload `.md` files directly through the web interface
+- Automatic structure preservation (headings, links, code blocks remain unchanged)
+- Only paragraph text is processed through paraphrasing/expansion
+- Maximum file size: 10 MB
+- UTF-8 encoding support
+- File validation and error handling
 
 ### Text Processing
 - Automatic text chunking for long inputs
